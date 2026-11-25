@@ -6,63 +6,93 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
-  actions: read
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout source
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.9'
-
-      - name: Extract project
-        run: unzip -o ELBAIK-Android-Project.zip
-
-      - name: Fix Java and Kotlin compatibility
+      - name: Create app project files
         run: |
+          mkdir -p www assets
+          cat > package.json <<'JSON'
+          {
+            "name": "elbaik-app",
+            "version": "1.0.0",
+            "private": true,
+            "dependencies": {
+              "@capacitor/core": "^6.1.0",
+              "@capacitor/cli": "^6.1.0",
+              "@capacitor/android": "^6.1.0"
+            }
+          }
+          JSON
+          cat > capacitor.config.json <<'JSON'
+          {
+            "appId": "com.elbaik.hassan",
+            "appName": "البيك حسن",
+            "webDir": "www",
+            "server": {
+              "url": "https://elbeik-site-updated.vercel.app/",
+              "cleartext": false
+            }
+          }
+          JSON
+          cat > www/index.html <<'HTML'
+          <!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><body style="background:#3a1117;color:#fff;font-family:sans-serif;text-align:center;padding-top:40vh">جاري التحميل...<script>location.replace("https://elbeik-site-updated.vercel.app/")</script></body></html>
+          HTML
+
+      - name: Prepare app icons from icon.png
+        run: |
+          pip install pillow
           python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("ELBAIK-Android-Project/app/build.gradle.kts")
-          s = p.read_text()
-
-          s = s.replace(
-              "    defaultConfig {",
-              """    compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-
-              kotlinOptions {
-                  jvmTarget = "17"
-              }
-
-              defaultConfig {"""
-          )
-
-          p.write_text(s)
+          from PIL import Image
+          src = Image.open("icon.png").convert("RGB").resize((1024, 1024))
+          src.save("assets/icon-only.png")
+          Image.new("RGB", (1024, 1024), src.getpixel((8, 8))).save("assets/icon-background.png")
+          fg = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+          k = int(1024 * 0.68)
+          fg.paste(src.resize((k, k)).convert("RGBA"), ((1024 - k) // 2, (1024 - k) // 2))
+          fg.save("assets/icon-foreground.png")
           PY
 
-      - name: Build APK
-        working-directory: ELBAIK-Android-Project
-        run: gradle --no-daemon assembleDebug
+      - name: Add Android platform
+        run: |
+          npm install
+          npx cap add android
+          npx cap sync android
+          npm install --no-save @capacitor/assets
+          npx capacitor-assets generate --android
 
-      - name: Upload APK
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: ELBAIK-APK
-          path: ELBAIK-Android-Project/app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk elbaik.apk
+
+      - name: Publish release (permanent download link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: البيك حسن - آخر نسخة
+          files: elbaik.apk
