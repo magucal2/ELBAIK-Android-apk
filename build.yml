@@ -1,0 +1,68 @@
+name: Build ELBAIK APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Extract project
+        run: unzip -o ELBAIK-Android-Project.zip
+
+      - name: Fix Java and Kotlin compatibility
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("ELBAIK-Android-Project/app/build.gradle.kts")
+          s = p.read_text()
+
+          s = s.replace(
+              "    defaultConfig {",
+              """    compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+
+              defaultConfig {"""
+          )
+
+          p.write_text(s)
+          PY
+
+      - name: Build APK
+        working-directory: ELBAIK-Android-Project
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ELBAIK-APK
+          path: ELBAIK-Android-Project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
